@@ -95,10 +95,10 @@ if os.path.exists(CLIENTS_PATH):
                 elif not isinstance(CLIENTS_TARGETS[k], list): CLIENTS_TARGETS[k] = [str(CLIENTS_TARGETS[k])]
     except: pass
 
-TARGET_UNIVERSITIES = ["นเรศวร", "มหาลัยนเรศวร" , "Naresuan University"]  
+TARGET_UNIVERSITIES = ["ธุรกิจบัณฑิตย์" , "Dhurakij Pundit University"]  
 TARGET_FACULTIES = ["เครื่องสำอาง","Cosmetic Science"] 
 TARGET_MAJORS = ["เครื่องสำอาง", "วิทยาศาสตร์เครื่องสำอาง","Cosmetic Science", "Cosmetics", "Cosmetic"]
-SEARCH_KEYWORDS = ["นเรศวร เครื่องสำอาง"]
+SEARCH_KEYWORDS = ["ธุรกิจบัณฑิตย์ เครื่องสำอาง","Cosmetic Dhurakij Pundit"]
 
 KEYWORDS_CONFIG = {
     "NPD": {"titles": ["NPD", "R&D", "RD", "Research", "Development", "วิจัย", "พัฒนา", "Formulation", "สูตร"]},
@@ -247,55 +247,172 @@ class JobThaiRowScraper:
         except: return ""
 
     def step1_login(self):
+        # ==============================================================================
+        # ส่วนที่ 1: Direct Login (Version: Specific IDs + Iframe Scanner)
+        # ==============================================================================
+        login_url = "https://www.jobthai.com/th/employer"
+        console.print("1️⃣  เข้าสู่หน้า Login (Direct)...", style="info")
+        
+        try:
+            self.driver.set_window_size(1920, 1080)
+            self.driver.get(login_url)
+            self.random_sleep(3, 5)
+
+            # --- 1. จัดการ Popup และ เมนู (เหมือนเดิม) ---
+            try:
+                close_btn = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="close-button"]')))
+                self.driver.execute_script("arguments[0].click();", close_btn)
+                self.random_sleep(1, 2)
+            except: pass
+
+            try:
+                # กดเมนูเข้าสู่ระบบ
+                login_menu = WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.XPATH, '//*[@id="menu-jobseeker-login"]')))
+                self.driver.execute_script("arguments[0].click();", login_menu)
+                self.random_sleep(3, 5) 
+                
+                # กดแท็บ Employer
+                employer_tab = WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.XPATH, '//*[@id="login_tab_employer"]')))
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", employer_tab)
+                time.sleep(2)
+                self.driver.execute_script("arguments[0].click();", employer_tab)
+                console.print("   👉 กดสลับแท็บ Employer สำเร็จ (รอ 5 วิ...)", style="dim")
+                time.sleep(30)
+            except Exception as e:
+                console.print(f"   ⚠️ กดเมนูไม่สำเร็จ (อาจจะอยู่หน้านั้นแล้ว): {e}", style="warning")
+
+            # --- 2. ปฏิบัติการค้นหา (โดยใช้ ID ที่คุณให้มาเป็นอันดับแรก) ---
+            user_input = None; pass_input = None
+
+            def find_inputs():
+                u, p = None, None
+                
+                # 🟢 1. หา Username (ใส่ ID ของคุณเป็นอันแรก)
+                # รวมทั้ง Selector แบบ ID และ XPATH ที่ให้มา
+                user_selectors = [
+                    "#login-form-username",                # ID โดยตรง (แม่นสุด)
+                    "//*[@id='login-form-username']",      # XPATH ที่ให้มา
+                    "input[name='username']",              # ของเดิม
+                    "input[placeholder='ชื่อผู้ใช้']"         # Placeholder ที่ให้มา
+                ]
+                
+                for sel in user_selectors:
+                    try:
+                        if sel.startswith("//"): # ถ้าเป็น XPATH
+                            els = self.driver.find_elements(By.XPATH, sel)
+                        else: # ถ้าเป็น CSS Selector
+                            els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                            
+                        for el in els:
+                            if el.is_displayed(): u = el; break
+                    except: continue
+                    if u: break
+                
+                # 🟢 2. หา Password (ใส่ ID ของคุณเป็นอันแรก)
+                pass_selectors = [
+                    "#login-form-password",                # ID โดยตรง (แม่นสุด)
+                    "//*[@id='login-form-password']",      # XPATH ที่ให้มา
+                    "input[name='password']",              # ของเดิม
+                    "input[placeholder='รหัสผ่าน']"          # Placeholder ที่ให้มา
+                ]
+                
+                for sel in pass_selectors:
+                    try:
+                        if sel.startswith("//"):
+                            els = self.driver.find_elements(By.XPATH, sel)
+                        else:
+                            els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                            
+                        for el in els:
+                            if el.is_displayed(): p = el; break
+                    except: continue
+                    if p: break
+                    
+                return u, p
+
+            # รอบที่ 1: หาในหน้าปกติ
+            user_input, pass_input = find_inputs()
+
+            # รอบที่ 2: ถ้าไม่เจอ ลองมุด Iframe (เผื่อ ID นี้มันอยู่ใน Iframe)
+            if not user_input or not pass_input:
+                iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                if iframes:
+                    console.print(f"   👀 หา ID ในหน้าหลักไม่เจอ... กำลังสแกน {len(iframes)} Iframes...", style="dim")
+                    for i, frame in enumerate(iframes):
+                        try:
+                            self.driver.switch_to.default_content()
+                            self.driver.switch_to.frame(frame)
+                            user_input, pass_input = find_inputs()
+                            if user_input and pass_input:
+                                console.print(f"   ✅ เจอช่องกรอก (ตาม ID) ซ่อนอยู่ใน Iframe ที่ {i+1}!", style="success")
+                                break
+                        except: continue
+                    if not user_input: self.driver.switch_to.default_content()
+
+            # --- 3. กรอกข้อมูล ---
+            if user_input and pass_input:
+                console.print("   📝 เจอช่องกรอกแล้ว! กำลังพิมพ์รหัส...", style="info")
+                try:
+                    # คลิกย้ำๆ เพื่อให้แน่ใจว่า Cursor ลงไปในช่อง
+                    try: user_input.click()
+                    except: self.driver.execute_script("arguments[0].click();", user_input)
+                    time.sleep(0.5)
+                    user_input.clear()
+                    user_input.send_keys(MY_USERNAME)
+                    
+                    time.sleep(0.5)
+                    try: pass_input.click()
+                    except: self.driver.execute_script("arguments[0].click();", pass_input)
+                    pass_input.clear()
+                    pass_input.send_keys(MY_PASSWORD)
+                    pass_input.send_keys(Keys.ENTER)
+                    
+                    # รอผลลัพธ์
+                    for _ in range(30):
+                        time.sleep(1)
+                        if "auth.jobthai.com" not in self.driver.current_url and "login" not in self.driver.current_url:
+                            console.print("✅ Login แบบปกติสำเร็จ!", style="success")
+                            return True
+                except Exception as e:
+                     console.print(f"   ❌ พิมพ์รหัสไม่ได้: {e}", style="error")
+            else:
+                console.print("   ❌ หาช่องกรอก User/Pass ไม่เจอจริงๆ (ลองทุกท่าแล้ว)", style="error")
+
+        except Exception as e:
+            console.print(f"⚠️ Direct Login Error: {e}", style="warning")
+
+        # ==============================================================================
+        # ส่วนที่ 2: Cookie Bypass (แผนสำรอง)
+        # ==============================================================================
+        console.print("🔄 Login ปกติไม่สำเร็จ... กำลังลองใช้ Cookie...", style="bold yellow")
+        
         cookies_env = os.getenv("COOKIES_JSON")
         if cookies_env:
-            console.print("🍪 ใช้ Cookie Bypass...", style="bold green")
             try:
-                self.driver.get("https://www.jobthai.com/th/employer")
-                time.sleep(2)
+                self.driver.switch_to.default_content()
+                if "jobthai.com" not in self.driver.current_url:
+                    self.driver.get("https://www.jobthai.com/th/employer")
+                
                 cookies_list = json.loads(cookies_env)
                 for cookie in cookies_list:
                     c = {k: v for k, v in cookie.items() if k in ['name', 'value', 'domain', 'path', 'expiry', 'secure', 'httpOnly']}
                     try: self.driver.add_cookie(c)
                     except: pass
+                
                 self.driver.refresh()
                 time.sleep(5)
+                
                 self.driver.get("https://www3.jobthai.com/findresume/findresume.php?l=th")
                 time.sleep(3)
+                
                 if "login" not in self.driver.current_url:
-                    console.print("🎉 Login Bypass สำเร็จ!", style="success")
+                    console.print("🎉 Login Bypass ด้วย Cookie สำเร็จ!", style="success")
                     return True
-            except Exception as e: console.print(f"❌ Cookie Error: {e}", style="error")
+            except Exception as e: 
+                console.print(f"❌ Cookie Error: {e}", style="error")
 
-        login_url = "https://www.jobthai.com/th/employer"
-        console.print("1️⃣   เข้าสู่หน้า Login (Direct)...", style="info")
-        try:
-            self.driver.get(login_url)
-            self.random_sleep(3, 5)
-            
-            if len(self.driver.find_elements(By.TAG_NAME, "iframe")) > 0:
-                console.print("   👀 พบ Iframe (เสี่ยง Cloudflare)", style="warning")
-
-            try:
-                user_input = WebDriverWait(self.driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "input[name='username']")))
-                pass_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-            except:
-                console.print("❌ หาช่องกรอกไม่เจอ", style="error")
-                return False
-
-            if user_input and pass_input:
-                user_input.clear(); user_input.send_keys(MY_USERNAME)
-                pass_input.clear(); pass_input.send_keys(MY_PASSWORD)
-                pass_input.send_keys(Keys.ENTER)
-                for _ in range(30):
-                    time.sleep(1)
-                    if "auth.jobthai.com" not in self.driver.current_url and "login" not in self.driver.current_url:
-                        console.print("✅ Login สำเร็จ!", style="success")
-                        return True
-            return False
-        except Exception as e:
-            console.print(f"❌ Login Failed: {e}", style="error")
-            return False
+        console.print("💀 Login ล้มเหลวทุกวิธี", style="bold red")
+        return False
 
     def step2_search(self, keyword):
         search_url = "https://www3.jobthai.com/findresume/findresume.php?l=th"
